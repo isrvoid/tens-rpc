@@ -47,5 +47,5 @@ test "mark increasing" {
     var adr: u32 = undefined;
     _ = c.tral_mark(&m, 1, &adr);
     assert(c.tral_mark(&m, 2, &adr));
-    //assert(2 == adr); FIXME
+    assert(2 == adr);
 }

@@ -17,9 +17,15 @@
 #define TRAL_MARK_MAX_BLOCKS 32
 
 typedef struct {
+    uint32_t i;
+    uint32_t len;
+} tral_index_slice_t;
+
+typedef struct {
     void* buf;
     uint32_t num_leaves;
     uint32_t tree_stride;
+    tral_index_slice_t bottom_row;
     uint8_t num_top_branches; // [2, 32]
     uint8_t tree_height;
 } tral_member_t;
