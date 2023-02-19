@@ -33,19 +33,47 @@ test "mark" {
 }
 
 test "clear" {
-    var m = initMember(2);
+    var m = initMember(1);
     var adr: u32 = undefined;
     _ = c.tral_mark(&m, 1, &adr);
-    const prev_adr = adr;
     c.tral_clear(&m, adr, 1);
+    // cleared block is reused
     assert(c.tral_mark(&m, 1, &adr));
-    assert(adr == prev_adr);
+    assert(0 == adr);
 }
 
-test "mark increasing" {
-    var m = initMember(8);
+test "mark larger size" {
+    var m = initMember(4);
+    var adr: u32 = undefined;
+    assert(c.tral_mark(&m, 2, &adr));
+    assert(0 == adr);
+    assert(c.tral_mark(&m, 2, &adr));
+    assert(2 == adr);
+}
+
+test "mark increasing size" {
+    var m = initMember(3);
     var adr: u32 = undefined;
     _ = c.tral_mark(&m, 1, &adr);
     assert(c.tral_mark(&m, 2, &adr));
+    assert(2 == adr);
+}
+
+test "mark decreasing size" {
+    var m = initMember(3);
+    var adr: u32 = undefined;
+    _ = c.tral_mark(&m, 2, &adr);
+    assert(c.tral_mark(&m, 1, &adr));
+    assert(2 == adr);
+}
+
+test "clear previous" {
+    var m = initMember(3);
+    var adr: u32 = undefined;
+    _ = c.tral_mark(&m, 1, &adr);
+    _ = c.tral_mark(&m, 1, &adr);
+    c.tral_clear(&m, 0, 1);
+    _ = c.tral_mark(&m, 1, &adr);
+    assert(c.tral_mark(&m, 1, &adr));
     assert(2 == adr);
 }
