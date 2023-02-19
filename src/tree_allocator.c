@@ -174,6 +174,12 @@ static inline void updateTreeLeafFull(uint32_t* bottom_row, uint32_t leaf_i, uin
     }
 }
 
+static inline uint32_t leafBlocksMask(int num_blocks_log2, int offset) {
+    const int w = 1 << num_blocks_log2;
+    const uint32_t width_mask = ((w != NUM_BRANCHES) << (w & BRANCH_INDEX_MASK)) - 1;
+    return width_mask << offset;
+}
+
 bool tral_mark(tral_member_t* m, uint32_t num_blocks, uint32_t* adr_out) {
     assert(num_blocks && num_blocks <= TRAL_MARK_MAX_BLOCKS);
     const int num_blocks_log2 = UPPER_LOG2_SMALL(num_blocks);
@@ -185,8 +191,7 @@ bool tral_mark(tral_member_t* m, uint32_t num_blocks, uint32_t* adr_out) {
     const uint32_t leaf_i = leafIndex(tree, m->num_top_branches, m->tree_height);
     uint32_t* const leaf = leaves + leaf_i;
     const int blocks_offset = leafBlocksOffset(*leaf, num_blocks_log2);
-    const uint32_t mark_width_mask = (1u << (1 << num_blocks_log2)) - 1;
-    *leaf |= mark_width_mask << blocks_offset;
+    *leaf |= leafBlocksMask(num_blocks_log2, blocks_offset);
     *adr_out = (leaf_i << NUM_BRANCHES_LOG2) + blocks_offset;
 
     const int update_start_i = leafHasSpaceEnd(*leaf);
