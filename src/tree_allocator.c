@@ -19,13 +19,13 @@ static_assert(TRAL_MARK_MAX_BLOCKS == 1 << NUM_BRANCHES_LOG2, "MARK_MAX_BLOCKS o
 // The trees share leaves that are stored separately.
 // Because of this, the trees are 1 shorter than a single tree would be.
 static int treeHeight(size_t min_blocks) {
-    int h = 0;
-    size_t v = min_blocks;
-    for (; v > NUM_BRANCHES; ++h)
-        v >>= NUM_BRANCHES_LOG2;
+    int h = 1;
+    uint32_t capacity = NUM_BRANCHES;
+    for (; capacity; capacity <<= NUM_BRANCHES_LOG2)
+        h += min_blocks > capacity;
 
-    assert(h > 0);
-    return h;
+    assert(h > 1);
+    return h - 1;
 }
 
 static int numTopNodeBranches(size_t min_blocks) {
@@ -81,7 +81,7 @@ uint32_t tral_required_member_buffer_size(size_t min_blocks) {
 static void initTopNodes(tral_member_t* m) {
     uint32_t* p = (uint32_t*)m->buf + m->num_leaves;
     uint32_t* const end = p + m->tree_stride * NUM_TREES;
-    const uint32_t non_existent_marked = ~((1u << m->num_top_branches) - 1);
+    const uint32_t non_existent_marked = m->num_top_branches < NUM_BRANCHES ? ~((1u << m->num_top_branches) - 1) : 0;
     for (; p < end; p += m->tree_stride)
         *p = non_existent_marked;
 }
@@ -114,7 +114,7 @@ static inline int indexOfFirstZero(uint32_t x) {
     return countTrailingZeros(~x);
 }
 
-static inline uint32_t leafIndex(uint32_t* const top_node, int num_top_branches, int tree_height) {
+static inline uint32_t leafWithSpaceIndex(uint32_t* const top_node, int num_top_branches, int tree_height) {
     uint32_t node_i = indexOfFirstZero(*top_node);
     const uint32_t* row = top_node + 1;
     uint32_t row_width = num_top_branches;
@@ -163,10 +163,12 @@ static inline void updateTreeLeafFull(uint32_t* bottom_row, uint32_t leaf_i, uin
     uint32_t* row = bottom_row;
     int branch_i = leaf_i & BRANCH_INDEX_MASK;
     uint32_t node_i = leaf_i >> NUM_BRANCHES_LOG2;
-    for (int row_i = tree_height - 1; ; --row_i, branch_i = node_i & BRANCH_INDEX_MASK, node_i >>= NUM_BRANCHES_LOG2, row_width >>= NUM_BRANCHES_LOG2, row -= row_width) {
+    for (int row_i = tree_height - 1; ; --row_i, branch_i = node_i & BRANCH_INDEX_MASK, node_i >>= NUM_BRANCHES_LOG2) {
         row[node_i] |= 1u << branch_i;
         const bool node_has_space_left = ~row[node_i];
         if (row_i == 0 || node_has_space_left) return;
+        row_width = (row_width < NUM_BRANCHES) + (row_width >> NUM_BRANCHES_LOG2);
+        row -= row_width;
     }
 }
 
@@ -184,7 +186,7 @@ bool tral_mark(tral_member_t* m, uint32_t num_blocks, uint32_t* adr_out) {
     uint32_t* const tree = tree0 + num_blocks_log2 * m->tree_stride;
     if (*tree == UINT32_MAX) return false;
 
-    const uint32_t leaf_i = leafIndex(tree, m->num_top_branches, m->tree_height);
+    const uint32_t leaf_i = leafWithSpaceIndex(tree, m->num_top_branches, m->tree_height);
     uint32_t* const leaf = leaves + leaf_i;
     const int blocks_offset = leafBlocksOffset(*leaf, num_blocks_log2);
     *leaf |= leafBlocksMask(num_blocks_log2, blocks_offset);
@@ -202,10 +204,12 @@ static inline void updateTreeLeafHasSpace(uint32_t* bottom_row, uint32_t leaf_i,
     uint32_t* row = bottom_row;
     int branch_i = leaf_i & BRANCH_INDEX_MASK;
     uint32_t node_i = leaf_i >> NUM_BRANCHES_LOG2;
-    for (int row_i = tree_height - 1; ; --row_i, branch_i = node_i & BRANCH_INDEX_MASK, node_i >>= NUM_BRANCHES_LOG2, row_width >>= NUM_BRANCHES_LOG2, row -= row_width) {
+    for (int row_i = tree_height - 1; ; --row_i, branch_i = node_i & BRANCH_INDEX_MASK, node_i >>= NUM_BRANCHES_LOG2) {
         const bool node_had_space = ~row[node_i];
         row[node_i] &= ~(1u << branch_i);
         if (row_i == 0 || node_had_space) return;
+        row_width = (row_width < NUM_BRANCHES) + (row_width >> NUM_BRANCHES_LOG2);
+        row -= row_width;
     }
 }
 
