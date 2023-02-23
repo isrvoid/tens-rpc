@@ -1,18 +1,22 @@
+// MIT License
+// Copyright (c) 2023 Johannes Teichrieb
+// GitHub, Gmail: isrvoid
+
 #include "tree_allocator.h"
 
 #include <assert.h>
 #include <string.h>
 
-// anything with 'leaves' in the name refers to the continuous block bitmap
-// a leaf is an uint32_t bit-mapping 32 blocks
-// top tree node has at least 2 branches, everything else has NUM_BRANCHES branches
+// Anything with 'leaves' in the name refers to the continuous block bitmap.
+// A leaf is an uint32_t representing 32 blocks.
+// Top tree node has at least 2 branches, other nodes have 32.
 #define NUM_BRANCHES_LOG2 5
 #define NUM_BRANCHES (1 << NUM_BRANCHES_LOG2)
 #define BRANCH_INDEX_MASK (NUM_BRANCHES - 1)
 #define NUM_TREES (NUM_BRANCHES_LOG2 + 1)
 #define UPPER_LOG2_SMALL(x) ((x > 1) + (x > 2) + (x > 4) + (x > 8) + (x > 16))
 
-// implementation assumes at least 32-bit ints for bit shifting stuff
+// implementation assumes at least 32-bit ints
 static_assert(sizeof 1 >= 4, "int size < 32-bit");
 static_assert(TRAL_MARK_MAX_BLOCKS == 1 << NUM_BRANCHES_LOG2, "MARK_MAX_BLOCKS out of sync");
 
@@ -40,7 +44,7 @@ static uint32_t numLeaves(size_t min_blocks) {
     return num_top_branches << NUM_BRANCHES_LOG2 * (h - 1);
 }
 
-static uint32_t numTreeNodes(uint32_t min_blocks) {
+static uint32_t numTreeNodes(size_t min_blocks) {
     const int h = treeHeight(min_blocks);
     uint32_t row_width = numTopNodeBranches(min_blocks);
     uint32_t res = 1; // top node
@@ -132,7 +136,11 @@ static inline int leafBlocksOffset(uint32_t x, int num_blocks_log2) {
         case 4:
             return !!(x & 0xffff) << 4;
         case 3:
-            return (!!(x & 0xff00) & !!(x & 0xff)) << 4 | (!!(x & 0xff0000) & !!(x & 0xff)) << 3;
+            x = x >> 1 | x | 0xaaaaaaaa;
+            x = x >> 2 | x | 0xeeeeeeee;
+            x = x >> 4 | x | 0xfefefefe;
+            x = ~x & -~x;
+            return !!(x & 0xffff0000) << 4 | !!(x & 0xff00ff00) << 3;
         case 2:
             x = x >> 1 | x | 0xaaaaaaaa;
             x = x >> 2 | x | 0xeeeeeeee;
