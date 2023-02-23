@@ -5,6 +5,7 @@ const test_alloc = @import("test_allocator.zig");
 
 pub fn main() void {
     print("warmup...\n", .{});
+    print("Blocks: ns/call\n", .{});
     _ = fuzzy_benchmark(1e6);
 
     for (10..27) |i|
@@ -13,13 +14,13 @@ pub fn main() void {
 
 fn runBenchmark(num_blocks: usize) void {
     if (num_blocks < 1 << 20) {
-        print("{} K blocks: ", .{num_blocks >> 10});
+        print("{d:4} K:", .{num_blocks >> 10});
     } else
-        print("{} M blocks: ", .{num_blocks >> 20});
+        print("{d:4} M:", .{num_blocks >> 20});
     const stats = fuzzy_benchmark(num_blocks);
     const ops = stats.mark + stats.clear;
     const ns_per_op = 1e3 * @intToFloat(f64, stats.dur_us) / @intToFloat(f64, ops);
-    print("{d:.1} ns/op\n", .{ns_per_op});
+    print("{d:8.1}\n",  .{ns_per_op});
 }
 
 // the bnechmark includes overheads: random numbers, bookkeeping tally
@@ -36,7 +37,7 @@ fn fuzzy_benchmark(min_blocks: usize) Stats {
 
     var max_adr: u32 = 0;
     const start_time = std.time.microTimestamp();
-    outer: while (true) {
+    while (true) {
         if (gen.randOp()) |len| {
             var adr: u32 = undefined;
             if (!c.tral_mark(&tw.m, len, &adr))
@@ -54,10 +55,9 @@ fn fuzzy_benchmark(min_blocks: usize) Stats {
                     c.tral_clear(&tw.m, @truncate(u32, i), len);
                     tally[i] = 0;
                     stats.clear += 1;
-                    continue :outer;
+                    break;
                 }
             }
-            stats.clear_nop += 1;
         }
     }
     stats.dur_us = @bitCast(u64, std.time.microTimestamp() - start_time);
@@ -67,6 +67,5 @@ fn fuzzy_benchmark(min_blocks: usize) Stats {
 const Stats = struct {
     mark: u64 = 0,
     clear: u64 = 0,
-    clear_nop: u64 = 0,
     dur_us: u64 = undefined,
 };
