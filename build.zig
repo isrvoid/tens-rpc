@@ -3,23 +3,24 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const exe = b.addExecutable(.{
-        .name = "tens-rpc",
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
-    exe.install();
-
     const trpc = b.addStaticLibrary(.{
         .name = "tens_rpc",
-        //.root_source_file = .{ .path = "" },
         .target = target,
         .optimize = optimize,
     });
     trpc.addCSourceFile("src/tree_allocator.c", &.{});
     trpc.addIncludePath("src");
     trpc.linkLibC();
+
+    const exe = b.addExecutable(.{
+        .name = "benchmark",
+        .root_source_file = .{ .path = "src/benchmark.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.linkLibrary(trpc);
+    exe.addIncludePath("src");
+    exe.install();
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());

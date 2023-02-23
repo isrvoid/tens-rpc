@@ -1,11 +1,12 @@
 const std = @import("std");
 const mem = std.mem;
 const expect = std.testing.expect;
+const ceilPow2 = std.math.ceilPowerOfTwoPromote;
 const c = @cImport({ @cInclude("tree_allocator.h"); });
 
 pub fn enforceInclude() void {}
 
-const run_slow_tests = false;
+const run_long_tests = false;
 
 var common_buf: [0x1000]u8 = undefined;
 
@@ -82,7 +83,7 @@ test "clear previous" {
 }
 
 const num_blocks_test_list: []u32 = res: {
-    const end_threshold = if (run_slow_tests) 50e6 else 25e3;
+    const end_threshold = if (run_long_tests) 50e6 else 25e3;
     const phi = std.math.phi;
     var buf: [32]u32 = undefined;
     var len = 0;
@@ -115,7 +116,7 @@ test "pow2 alignment" {
     while (size > 0) : (size -= 1) {
         try expect(c.tral_mark(&m, size, &adr));
         try expect(end_i == adr);
-        end_i += upper_pow2(size);
+        end_i += ceilPow2(u8, size);
     }
 }
 
@@ -129,7 +130,7 @@ test "capacity" {
     while (true) : (i += 1) {
         const n = i % max_blocks + 1;
         if (!c.tral_mark(&m, n, &adr)) break;
-        num_blocks_remaining -= upper_pow2(@intCast(u8, n));
+        num_blocks_remaining -= ceilPow2(u8, @intCast(u8, n));
     }
     // fill any remaining space with size 1
     while (num_blocks_remaining > 0) : (num_blocks_remaining -= 1)
@@ -159,7 +160,7 @@ test "end boundary" {
 
 test "max block count end boundary" {
     // uses > 600 MB and takes tens of seconds on a desktop machine (debug build)
-    if (run_slow_tests)
+    if (run_long_tests)
         try test_end_boundary(1 << 32);
 }
 
@@ -189,14 +190,14 @@ fn test_end_boundary(min_blocks: usize) !void {
     }
 }
 
-const TralWrapper = struct {
+pub const TralWrapper = struct {
     allocator: mem.Allocator,
     m: c.tral_member_t,
     buf: []u8,
     num_blocks: usize,
     const Self = @This();
 
-    fn init(allocator: mem.Allocator, min_blocks: usize) Self {
+    pub fn init(allocator: mem.Allocator, min_blocks: usize) Self {
         const buf_len = c.tral_required_member_buffer_size(min_blocks);
         const buf = allocator.alloc(u8, buf_len) catch @panic("alloc() fail");
         var m: c.tral_member_t = undefined;
@@ -204,35 +205,19 @@ const TralWrapper = struct {
         return Self{ .allocator = allocator, .m = m, .buf = buf, .num_blocks = c.tral_num_blocks(&m) };
     }
 
-    fn deinit(self: *Self) void {
+    pub fn deinit(self: *Self) void {
         self.allocator.free(self.buf);
     }
 };
 
 test "fuzzy tests" {
+    const num_fails = if (run_long_tests) 1e6 else 1e3;
     for (num_blocks_test_list) |n|
-        _ = try fuzzy_test(n, 1e3);
+        try fuzzy_test(n, num_fails);
 }
 
-// this includes test overheads: random numbers, bookkeeping tally
-test "benchmark" {
-    const num_blocks = if (run_slow_tests) 1 << 24 else 1 << 16;
-    const stat = try fuzzy_test(num_blocks, 1e3);
-    const ops = stat.mark + stat.clear;
-    const ns_per_op = 1e3 * @intToFloat(f64, stat.dur_us) / @intToFloat(f64, ops);
-    std.debug.print("\nBENCHMARK tree alloc: {d:.1} ns/op\n", .{ns_per_op});
-}
-
-const FuzzyStat = struct {
-    mark: u64 = 0,
-    clear: u64 = 0,
-    clear_nop: u64 = 0,
-    dur_us: u64 = undefined,
-};
-
-fn fuzzy_test(min_blocks: usize, num_fails_to_end: usize) !FuzzyStat {
+fn fuzzy_test(min_blocks: usize, num_fails_to_end: usize) !void {
     std.debug.assert(num_fails_to_end > 0);
-    var stat = FuzzyStat{};
     const clear_search_len = c.TRAL_MARK_MAX_BLOCKS / 2;
     var gen = RandomOpGen.init();
     var pa = std.heap.page_allocator;
@@ -245,37 +230,31 @@ fn fuzzy_test(min_blocks: usize, num_fails_to_end: usize) !FuzzyStat {
     var num_fails: usize = 0;
     var capacity: usize = tw.num_blocks;
     var max_adr: u32 = 0;
-    const start_time = std.time.microTimestamp();
     outer: while (num_fails < num_fails_to_end) {
         if (gen.randOp()) |len| {
             var adr: u32 = undefined;
-            const res = c.tral_mark(&tw.m, len, &adr);
-            if (res) {
-                try expect(0 == tally[adr]);
-                tally[adr] = len;
-                capacity -= upper_pow2(len);
-                max_adr = @max(adr, max_adr);
-                stat.mark += 1;
-            } else
+            if (!c.tral_mark(&tw.m, len, &adr)) {
                 num_fails += 1;
+                continue;
+            }
+            try expect(0 == tally[adr]);
+            tally[adr] = len;
+            capacity -= ceilPow2(u8, len);
+            max_adr = @max(adr, max_adr);
         } else { // op: clear()
-            const clear_search_start = gen.randIndex(max_adr);
-            const clear_search_end = clear_search_start + clear_search_len;
-            var i = clear_search_start;
-            while (i < clear_search_end) : (i += 1) {
+            const search_start = gen.randIndex(max_adr);
+            const search_end = search_start + clear_search_len;
+            for (search_start..search_end) |i| {
                 const len = tally[i];
                 if (len != 0) {
-                    c.tral_clear(&tw.m, i, len);
-                    capacity += upper_pow2(len);
+                    c.tral_clear(&tw.m, @intCast(u32, i), len);
+                    capacity += ceilPow2(u8, len);
                     tally[i] = 0;
-                    stat.clear += 1;
                     continue :outer;
                 }
             }
-            stat.clear_nop += 1;
         }
     }
-    stat.dur_us = @bitCast(u64, std.time.microTimestamp() - start_time);
     // fill any remaining
     var adr: u32 = undefined;
     while (capacity > 0) : (capacity -= 1) {
@@ -290,7 +269,7 @@ fn fuzzy_test(min_blocks: usize, num_fails_to_end: usize) !FuzzyStat {
     const end = tally.len - clear_search_len;
     try expect(0 != tally[0]);
     while (i < end) {
-        const marked_len = upper_pow2(tally[i]);
+        const marked_len = ceilPow2(u8, tally[i]);
         tally_block_count += marked_len;
         // tally stores length at indices corresponding to start blocks, rest is 0
         for (i + 1 .. i + marked_len) |j|
@@ -298,18 +277,9 @@ fn fuzzy_test(min_blocks: usize, num_fails_to_end: usize) !FuzzyStat {
         i += marked_len;
     }
     try expect(tally_block_count == tw.num_blocks);
-    return stat;
 }
 
-fn upper_pow2(_x: u8) u8 {
-    var x = _x -% 1;
-    x |= x >> 1;
-    x |= x >> 2;
-    x |= x >> 4;
-    return x +% 1;
-}
-
-const RandomOpGen = struct {
+pub const RandomOpGen = struct {
     // the generator is buffered to reduce overhead during benchmark
     buf: [buf_len]u8 = undefined,
     read_i: u32 = buf_len,
@@ -321,12 +291,12 @@ const RandomOpGen = struct {
     const limitRange = std.rand.limitRangeBiased;
     const Self = @This();
 
-    fn init() Self {
+    pub fn init() Self {
         var rng = std.rand.DefaultPrng.init(@bitCast(u64, std.time.microTimestamp()));
         return Self{ .rng = rng };
     }
 
-    fn randOp(self: *Self) ?u8 {
+    pub fn randOp(self: *Self) ?u8 {
         if (self.read_i >= buf_len) {
             self.rng.fill(&self.buf);
             self.read_i = 0;
@@ -340,7 +310,7 @@ const RandomOpGen = struct {
         return if (len_pow2 < 4) len_pow2 else len_pow2 - limitRange(u8, rv, len_pow2 / 2);
     }
 
-    fn randIndex(self: *Self, max: u32) u32 {
+    pub fn randIndex(self: *Self, max: u32) u32 {
         if (self.read_i + 4 > buf_len) {
             self.rng.fill(&self.buf);
             self.read_i = 0;
